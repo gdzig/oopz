@@ -1,0 +1,9 @@
+[
+  {
+    "label": "Debug Tests",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "program": "zig",
+    "args": ["build", "test"]
+  }
+]

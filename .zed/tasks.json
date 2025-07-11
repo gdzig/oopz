@@ -1,0 +1,20 @@
+[
+  {
+    "label": "Build Library",
+    "command": "zig build",
+    "reveal_target": "dock",
+    "use_new_terminal": false
+  },
+  {
+    "label": "Build Docs",
+    "command": "zig build docs",
+    "reveal_target": "dock",
+    "use_new_terminal": false
+  },
+  {
+    "label": "Run Tests",
+    "command": "zig build test",
+    "reveal_target": "dock",
+    "use_new_terminal": false
+  }
+]
