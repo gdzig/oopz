@@ -51,7 +51,7 @@ pub fn isOpaqueClass(comptime T: type) bool {
 /// Expects a class type, e.g. `MyClass`, not `*MyClass`.
 pub fn isStructClass(comptime T: type) bool {
     return comptime switch (@typeInfo(T)) {
-        .@"struct" => @hasField(T, "base") and isClassPtr(@FieldType(T, "base")),
+        .@"struct" => @hasField(T, "base") and (isClassPtr(@FieldType(T, "base")) or isClass(@FieldType(T, "base"))),
         else => false,
     };
 }
@@ -206,7 +206,17 @@ pub inline fn upcast(comptime T: type, value: anytype) blk: {
 
         // Move to the next level up in the hierarchy
         opaque_ptr = switch (@typeInfo(CurrentType)) {
-            .@"struct" => @ptrCast(@field(@as(if (@typeInfo(U).pointer.is_const) *const CurrentType else *CurrentType, @ptrCast(@alignCast(opaque_ptr))), "base")),
+            .@"struct" => blk: {
+                const typed = @as(if (@typeInfo(U).pointer.is_const) *const CurrentType else *CurrentType, @ptrCast(@alignCast(opaque_ptr)));
+                const BaseField = @FieldType(CurrentType, "base");
+                if (comptime isClassPtr(BaseField)) {
+                    // Pointer base: read the pointer value
+                    break :blk @ptrCast(@field(typed, "base"));
+                } else {
+                    // Embedded base: take address of the embedded field
+                    break :blk @ptrCast(&@field(typed, "base"));
+                }
+            },
             .@"opaque" => @ptrCast(opaque_ptr),
             else => unreachable,
         };
@@ -262,6 +272,19 @@ const Node3D = opaque {
 const MyNode = struct {
     base: *Node3D,
 };
+// Embedded base: user class extending another user class
+const ClassA = struct {
+    base: *Object,
+    value_a: i32 = 1,
+};
+const ClassB = struct {
+    base: ClassA,
+    value_b: i32 = 2,
+};
+const ClassC = struct {
+    base: ClassB,
+    value_c: i32 = 3,
+};
 const RefCounted = opaque {
     const Base = Object;
 };
@@ -274,6 +297,10 @@ test "BaseOf" {
     try testing.expectEqual(Node, BaseOf(Node3D));
     try testing.expectEqual(Node3D, BaseOf(MyNode));
 
+    try testing.expectEqual(Object, BaseOf(ClassA));
+    try testing.expectEqual(ClassA, BaseOf(ClassB));
+    try testing.expectEqual(ClassB, BaseOf(ClassC));
+
     try testing.expectEqual(Object, BaseOf(RefCounted));
     try testing.expectEqual(RefCounted, BaseOf(Resource));
 }
@@ -284,6 +311,10 @@ test "depthOf" {
     try testing.expectEqual(1, depthOf(Node));
     try testing.expectEqual(2, depthOf(Node3D));
     try testing.expectEqual(3, depthOf(MyNode));
+
+    try testing.expectEqual(1, depthOf(ClassA));
+    try testing.expectEqual(2, depthOf(ClassB));
+    try testing.expectEqual(3, depthOf(ClassC));
 
     try testing.expectEqual(1, depthOf(RefCounted));
     try testing.expectEqual(2, depthOf(Resource));
@@ -316,6 +347,9 @@ test "isA: is self" {
     try testing.expect(comptime isA(Node, Node));
     try testing.expect(comptime isA(Node3D, Node3D));
     try testing.expect(comptime isA(MyNode, MyNode));
+    try testing.expect(comptime isA(ClassA, ClassA));
+    try testing.expect(comptime isA(ClassB, ClassB));
+    try testing.expect(comptime isA(ClassC, ClassC));
     try testing.expect(comptime isA(RefCounted, RefCounted));
     try testing.expect(comptime isA(Resource, Resource));
 }
@@ -325,6 +359,9 @@ test "isA: is parent" {
     try testing.expect(comptime isA(Object, RefCounted));
     try testing.expect(comptime isA(Node, Node3D));
     try testing.expect(comptime isA(Node3D, MyNode));
+    try testing.expect(comptime isA(Object, ClassA));
+    try testing.expect(comptime isA(ClassA, ClassB));
+    try testing.expect(comptime isA(ClassB, ClassC));
     try testing.expect(comptime isA(RefCounted, Resource));
 }
 
@@ -332,6 +369,9 @@ test "isA: is root" {
     try testing.expect(comptime isA(Object, Node));
     try testing.expect(comptime isA(Object, Node3D));
     try testing.expect(comptime isA(Object, MyNode));
+    try testing.expect(comptime isA(Object, ClassA));
+    try testing.expect(comptime isA(Object, ClassB));
+    try testing.expect(comptime isA(Object, ClassC));
     try testing.expect(comptime isA(Object, RefCounted));
     try testing.expect(comptime isA(Object, Resource));
 }
