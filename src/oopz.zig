@@ -181,7 +181,7 @@ pub inline fn upcast(comptime T: type, value: anytype) blk: {
     const PtrT = if (@typeInfo(T) == .optional) @typeInfo(T).optional.child else T;
     const PtrU = if (@typeInfo(U) == .optional) @typeInfo(U).optional.child else U;
 
-    if (@typeInfo(PtrU).pointer.is_const and !@typeInfo(PtrT).pointer.is_const) {
+    if (isConstPointer(PtrU) and !isConstPointer(PtrT)) {
         @compileError("upcast expects matching pointer constness, found '" ++ @typeName(T) ++ "' and '" ++ @typeName(U) ++ "'");
     }
 
@@ -195,7 +195,9 @@ pub inline fn upcast(comptime T: type, value: anytype) blk: {
         return null;
     }
 
-    var opaque_ptr: if (@typeInfo(U).pointer.is_const) *const anyopaque else *anyopaque = @ptrCast(value);
+    const PtrU = if (@typeInfo(U) == .optional) @typeInfo(U).optional.child else U;
+    const source_is_const = comptime isConstPointer(PtrU);
+    var opaque_ptr: if (source_is_const) *const anyopaque else *anyopaque = @ptrCast(value);
 
     // Walk up the inheritance hierarchy from child to parent
     inline for (selfAndAncestorsOf(RecursiveChild(U))) |CurrentType| {
@@ -207,7 +209,7 @@ pub inline fn upcast(comptime T: type, value: anytype) blk: {
         // Move to the next level up in the hierarchy
         opaque_ptr = switch (@typeInfo(CurrentType)) {
             .@"struct" => blk: {
-                const typed = @as(if (@typeInfo(U).pointer.is_const) *const CurrentType else *CurrentType, @ptrCast(@alignCast(opaque_ptr)));
+                const typed = @as(if (source_is_const) *const CurrentType else *CurrentType, @ptrCast(@alignCast(opaque_ptr)));
                 const BaseField = @FieldType(CurrentType, "base");
                 if (comptime isClassPtr(BaseField)) {
                     // Pointer base: read the pointer value
@@ -260,14 +262,19 @@ fn RecursiveChild(comptime T: type) type {
     };
 }
 
+fn isConstPointer(comptime T: type) bool {
+    const info = @typeInfo(T).pointer;
+    return if (@hasField(@TypeOf(info), "attrs")) info.attrs.@"const" else info.is_const;
+}
+
 const Object = opaque {
-    const Base = void;
+    pub const Base = void;
 };
 const Node = opaque {
-    const Base = Object;
+    pub const Base = Object;
 };
 const Node3D = opaque {
-    const Base = Node;
+    pub const Base = Node;
 };
 const MyNode = struct {
     base: *Node3D,
@@ -286,11 +293,23 @@ const ClassC = struct {
     value_c: i32 = 3,
 };
 const RefCounted = opaque {
-    const Base = Object;
+    pub const Base = Object;
 };
 const Resource = opaque {
-    const Base = RefCounted;
+    pub const Base = RefCounted;
 };
+
+fn expectEqualTypes(comptime expected: []const type, comptime actual: []const type) void {
+    if (expected.len != actual.len) {
+        @compileError(fmt.comptimePrint("expected {d} types, found {d}", .{ expected.len, actual.len }));
+    }
+
+    inline for (expected, actual, 0..) |Expected, Actual, i| {
+        if (Expected != Actual) {
+            @compileError(fmt.comptimePrint("expected type at index {d} to be '{s}', found '{s}'", .{ i, @typeName(Expected), @typeName(Actual) }));
+        }
+    }
+}
 
 test "BaseOf" {
     try testing.expectEqual(Object, BaseOf(Node));
@@ -321,25 +340,25 @@ test "depthOf" {
 }
 
 test "ancestorsOf" {
-    comptime try testing.expectEqualSlices(type, &.{}, &ancestorsOf(Object));
+    comptime expectEqualTypes(&.{}, &ancestorsOf(Object));
 
-    comptime try testing.expectEqualSlices(type, &.{Object}, &ancestorsOf(Node));
-    comptime try testing.expectEqualSlices(type, &.{ Node, Object }, &ancestorsOf(Node3D));
-    comptime try testing.expectEqualSlices(type, &.{ Node3D, Node, Object }, &ancestorsOf(MyNode));
+    comptime expectEqualTypes(&.{Object}, &ancestorsOf(Node));
+    comptime expectEqualTypes(&.{ Node, Object }, &ancestorsOf(Node3D));
+    comptime expectEqualTypes(&.{ Node3D, Node, Object }, &ancestorsOf(MyNode));
 
-    comptime try testing.expectEqualSlices(type, &.{Object}, &ancestorsOf(RefCounted));
-    comptime try testing.expectEqualSlices(type, &.{ RefCounted, Object }, &ancestorsOf(Resource));
+    comptime expectEqualTypes(&.{Object}, &ancestorsOf(RefCounted));
+    comptime expectEqualTypes(&.{ RefCounted, Object }, &ancestorsOf(Resource));
 }
 
 test "selfAndAncestorsOf" {
-    comptime try testing.expectEqualSlices(type, &.{Object}, &selfAndAncestorsOf(Object));
+    comptime expectEqualTypes(&.{Object}, &selfAndAncestorsOf(Object));
 
-    comptime try testing.expectEqualSlices(type, &.{ Node, Object }, &selfAndAncestorsOf(Node));
-    comptime try testing.expectEqualSlices(type, &.{ Node3D, Node, Object }, &selfAndAncestorsOf(Node3D));
-    comptime try testing.expectEqualSlices(type, &.{ MyNode, Node3D, Node, Object }, &selfAndAncestorsOf(MyNode));
+    comptime expectEqualTypes(&.{ Node, Object }, &selfAndAncestorsOf(Node));
+    comptime expectEqualTypes(&.{ Node3D, Node, Object }, &selfAndAncestorsOf(Node3D));
+    comptime expectEqualTypes(&.{ MyNode, Node3D, Node, Object }, &selfAndAncestorsOf(MyNode));
 
-    comptime try testing.expectEqualSlices(type, &.{ RefCounted, Object }, &selfAndAncestorsOf(RefCounted));
-    comptime try testing.expectEqualSlices(type, &.{ Resource, RefCounted, Object }, &selfAndAncestorsOf(Resource));
+    comptime expectEqualTypes(&.{ RefCounted, Object }, &selfAndAncestorsOf(RefCounted));
+    comptime expectEqualTypes(&.{ Resource, RefCounted, Object }, &selfAndAncestorsOf(Resource));
 }
 
 test "isA: is self" {
