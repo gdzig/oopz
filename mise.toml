@@ -1,0 +1,6 @@
+[tools]
+"github:gdzig/gdzig-zlint" = "0.6.1"
+
+[tasks.lint]
+description = "Run gdzig-zlint with the repository rules"
+run = "gdzig-zlint ."
